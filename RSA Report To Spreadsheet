@@ -1,0 +1,144 @@
+/******************************************
+* RSA Report
+* @version: 1.0
+* @authors: Frederick Vallaeys (Optmyzr), GPT-4 (openAI)
+* -------------------------------
+* Install this script in your Google Ads account (not an MCC account)
+* to generate a textual summary of campaign performance.
+* The text is generated using GPT and uses data from the Google Ads
+* account in which this script is installed
+* --------------------------------
+* For more PPC tools, visit www.optmyzr.com.
+******************************************/
+
+var OPEN_AI_API_KEY = ''; // get your own API key at https://platform.openai.com/account/api-keys
+
+var GPT_MODEL = 'gpt-3.5-turbo';
+
+// Enter your own list of facts so that the summary follows your PPC management style and goals
+var FACTS =  ["facts: The target ROAS is 400%.",
+              "A ROAS higher is good, and a ROAS lower is bad.",
+              "If the Search lost IS (budget) > 10% and the ROAS is above the target, the budget should be raised.",
+              "If the Search lost IS (budget) > 10% the bids should be adjusted"];
+
+var EMAIL_ADDRESS = "";  // Replace with your email address
+
+var SPREADSHEET_URL = ''; // Replace with your Spreadsheet URL
+  
+// Play with the prompt to get different styles of summarizations
+var PROMPT = "prompt: write a summary of the campaigns' performance comparing the 2 periods. Do not include Search Lost IS in the summary.";
+
+
+
+function main() {
+  var date = new Date();
+  var firstDayPrevMonth = new Date(date.getFullYear(), date.getMonth() - 1, 1);
+  var lastDayPrevMonth = new Date(date.getFullYear(), date.getMonth(), 0);
+  var firstDayMonthBeforeThat = new Date(date.getFullYear(), date.getMonth() - 2, 1);
+  var lastDayMonthBeforeThat = new Date(date.getFullYear(), date.getMonth() - 1, 0);
+
+  var prevMonth = getFormattedDate(firstDayPrevMonth) + ',' + getFormattedDate(lastDayPrevMonth);
+  var monthBeforeThat = getFormattedDate(firstDayMonthBeforeThat) + ',' + getFormattedDate(lastDayMonthBeforeThat);
+
+  var metrics = ['Clicks', 'Impressions', 'Cost', 'Ctr', 'AverageCpc', 'Conversions', 'ConversionRate', 'CostPerConversion'];
+  var headers = ['CampaignName'];
+
+  metrics.forEach(function (metric) {
+    headers.push(metric + '_PrevMonth');
+    headers.push(metric + '_MonthBeforeThat');
+    headers.push(metric + '_ChangePercent');
+  });
+
+  var campaigns = {};
+
+  var report = AdsApp.report(
+    'SELECT CampaignName, ' + metrics.join(', ') +
+    ' FROM CAMPAIGN_PERFORMANCE_REPORT ' +
+    ' WHERE CampaignStatus IN ["ENABLED", "PAUSED"] ' +
+    ' DURING ' + monthBeforeThat
+  );
+
+  var rows = report.rows();
+  while (rows.hasNext()) {
+    var row = rows.next();
+    var campaignName = row['CampaignName'];
+
+    if (!campaigns[campaignName]) {
+      campaigns[campaignName] = {};
+    }
+
+    metrics.forEach(function (metric) {
+      campaigns[campaignName][metric + '_MonthBeforeThat'] = parseFloat(row[metric] || '0');
+    });
+  }
+
+  report = AdsApp.report(
+    'SELECT CampaignName, ' + metrics.join(', ') +
+    ' FROM CAMPAIGN_PERFORMANCE_REPORT ' +
+    ' WHERE CampaignStatus IN ["ENABLED", "PAUSED"] ' +
+    ' DURING ' + prevMonth
+  );
+
+  rows = report.rows();
+  while (rows.hasNext()) {
+    var row = rows.next();
+    var campaignName = row['CampaignName'];
+
+    if (!campaigns[campaignName]) {
+      campaigns[campaignName] = {};
+    }
+
+    metrics.forEach(function (metric) {
+      var valuePrevMonth = parseFloat(row[metric] || '0');
+      campaigns[campaignName][metric + '_PrevMonth'] = valuePrevMonth;
+
+      var valueMonthBeforeThat = campaigns[campaignName][metric + '_MonthBeforeThat'] || 0;
+
+      var changePercent = ((valuePrevMonth - valueMonthBeforeThat) / valueMonthBeforeThat) * 100;
+      campaigns[campaignName][metric + '_ChangePercent'] = isNaN(changePercent) ? 'N/A' : changePercent.toFixed(2) + '%';
+    });
+  }
+
+  var csvRows = [headers.join(',')];
+
+  for (var campaignName in campaigns) {
+    var csvRow = [campaignName];
+
+    metrics.forEach(function (metric) {
+      csvRow.push(campaigns[campaignName][metric + '_PrevMonth'] || '0');
+      csvRow.push(campaigns[campaignName][metric + '_MonthBeforeThat'] || '0');
+      csvRow.push(campaigns[campaignName][metric + '_ChangePercent'] || 'N/A');
+    });
+
+    csvRows.push(csvRow.join(','));
+  }
+
+  // Write data to Google Spreadsheet
+  writeToSpreadsheet(csvRows);
+}
+
+function getFormattedDate(date) {
+  var month = '' + (date.getMonth() + 1);
+  var day = '' + date.getDate();
+  var year = date.getFullYear();
+
+  if (month.length < 2) month = '0' + month;
+  if (day.length < 2) day = '0' + day;
+
+  return [year, month, day].join('');
+}
+
+function writeToSpreadsheet(csvRows) {
+  // Open the Spreadsheet
+  var spreadsheet = SpreadsheetApp.openByUrl(SPREADSHEET_URL);
+  var sheet = spreadsheet.getSheets()[0]; // Get the first sheet
+  
+  // Clear the existing contents
+  sheet.clear();
+  
+  // Write new data
+  for (var i = 0; i < csvRows.length; i++) {
+    var row = csvRows[i].split(',');
+    sheet.appendRow(row);
+  }
+}
